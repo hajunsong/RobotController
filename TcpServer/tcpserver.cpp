@@ -51,6 +51,7 @@ void NRMKHelper::TcpServer::OnEvent(UINT uEvent, LPVOID lpvData)
         else{
             qDebug() << "Tcp Comm RT Task Resume";
             rt_task_resume(&comm_task);
+            dataControl->opMode = 2;
         }
 
         break;
@@ -70,6 +71,8 @@ void NRMKHelper::TcpServer::OnEvent(UINT uEvent, LPVOID lpvData)
 
         if (IsServer())
             waitForConnection(0);
+
+        dataControl->opMode = 10;
 
         break;
 
@@ -145,11 +148,15 @@ void NRMKHelper::TcpServer::OnDataReceived(const LPBYTE lpBuffer, DWORD dwCount)
 
             if (lpBuffer[0] == 'N' && lpBuffer[1] == 'D'){
                 memcpy(&dataControl->ClientToServerInitParam, &lpBuffer[2], sizeof(char)*(dwCount - 4));
-                qDebug() << static_cast<char>(dataControl->ClientToServerInitParam.numJoint);
-                qDebug() << static_cast<char>(dataControl->ClientToServerInitParam.numDof);
-                qDebug() << static_cast<char>(dataControl->ClientToServerInitParam.module);
-//                qDebug() << static_cast<char>(dataControl->ClientToServerInitParam.comm);
-//                qDebug() << static_cast<char>(dataControl->ClientToServerInitParam.baud);
+                dataControl->numJoint = dataControl->ClientToServerInitParam.numJoint;
+                dataControl->numDof = dataControl->ClientToServerInitParam.numDof;
+                dataControl->module = dataControl->ClientToServerInitParam.module;
+                dataControl->ClientToServer.desiredJoint = new double[dataControl->numJoint];
+                dataControl->ClientToServer.desiredCartesian = new double[dataControl->numDof];
+                dataControl->ServerToClient.presentJoint = new int[dataControl->numJoint];
+//                qDebug() << QString::number(static_cast<char>(dataControl->numJoint));
+//                qDebug() << QString::number(static_cast<char>(dataControl->numDof));
+//                qDebug() << QString::number(static_cast<char>(dataControl->module));
             }
             else {
                 data_corrected = false;
@@ -179,13 +186,35 @@ void NRMKHelper::TcpServer::comm_run(void *arg){
     while(pTcpServer->connected){
         pTcpServer->comm_thread_run = true;
         rt_task_wait_period(nullptr); //wait for next cycle
-        now = rt_timer_read();
 
-        pTcpServer->sendKey(static_cast<char>(now-previous));
+        if (pTcpServer->dataControl->opMode >= 2){
+            pTcpServer->sendData();
+        }
+
+//        now = rt_timer_read();
+
+//        pTcpServer->sendKey(static_cast<char>(now-previous));
+
 
 //        rt_printf("Comm : Time since last turn: %ld.%06ld ms\n",
 //                  static_cast<unsigned long>(now - previous) / 1000000,
 //                  static_cast<unsigned long>(now - previous) % 1000000);
-        previous = now;
+//        previous = now;
     }
+}
+
+void NRMKHelper::TcpServer::sendData()
+{
+    uchar _buf[29];
+    uint indx = 0;
+
+    memcpy(_buf, NRMK_SOCKET_START_TOKEN, NRMK_SOCKET_TOKEN_SIZE); // 2 byte, START token
+    indx += NRMK_SOCKET_TOKEN_SIZE;
+    memcpy(_buf + indx, &dataControl->ServerToClient.data_index, 1); // 1 byte, data index
+    indx += 1;
+    memcpy(_buf + indx, dataControl->ServerToClient.presentJoint, 24); //
+    indx += 24;
+    memcpy(_buf + indx, NRMK_SOCKET_END_TOKEN, NRMK_SOCKET_TOKEN_SIZE); // 2 byte, END token
+    indx += NRMK_SOCKET_TOKEN_SIZE;
+    WriteComm(_buf, indx, INFINITE);
 }

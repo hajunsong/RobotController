@@ -83,5 +83,7 @@ namespace NRMKHelper{
         unsigned char *cmdbuf;
         bool data_corrected;
         DataControl *dataControl;
+
+        void sendData();
     };
 }

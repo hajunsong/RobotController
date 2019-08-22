@@ -10,6 +10,8 @@ RobotController::RobotController(QObject *parent) : QObject(parent){
 
     Module_SEA = new SEA::DxlControl();
     Module_FAR = new FAR::DxlControl();
+
+    data_index = 0;
 }
 
 RobotController::~RobotController(){
@@ -32,6 +34,9 @@ RobotController::~RobotController(){
     delete dxlTimer;
 
     delete Module_SEA;
+    for(uint8_t i = 0; i < dataControl->numJoint; i++){
+        Module_FAR->dxl_deinit(i);
+    }
     delete Module_FAR;
 }
 
@@ -58,15 +63,8 @@ void RobotController::dxlTimeout(){
     case Module::SEA:
         if (!module_init){
             dxlTimer->stop();
-            Module_SEA = new SEA::DxlControl();
             Module_SEA->init();
             moduleInitSEA();
-        }
-        else{
-//            present_position = Module_SEA->getPresentPosition(1);
-//            Module_SEA->getDxlValue(1, SEA::ADDR_PRESENT_POSITION, &present_position);
-//            Module_SEA->setDxlValue(1, ADDR_GOAL_POSITION, present_position+1000);
-//            qDebug() << present_position;
         }
         break;
     case Module::FAR:
@@ -74,11 +72,6 @@ void RobotController::dxlTimeout(){
             dxlTimer->stop();
             Module_FAR->init();
             moduleInitFAR();
-        }
-        else{
-//            Module_FAR->getGroupSyncReadPresentPosition(present_position);
-//            qDebug() << present_position[0] << ", " << present_position[1] << ", " << present_position[2] << ", "
-//                    << present_position[3] << ", " << present_position[4] << ", " << present_position[5];
         }
         break;
     case Module::JS_R8:
@@ -99,6 +92,7 @@ void RobotController::robot_RT(){
     }
     else{
         qDebug() << "Robot Control RT Task Start";
+        dataControl->opMode = Status::Wait;
         rt_task_start(&robot_task, &robot_run, this);
     }
 }
@@ -110,7 +104,7 @@ void RobotController::robot_run(void *arg){
 
     pThis->robot_thread_run = false;
 
-    rt_task_set_periodic(&pThis->robot_task, TM_NOW, 5e6);
+    rt_task_set_periodic(&pThis->robot_task, TM_NOW, 50e6);
 
     int32_t present_position[6] = {0,};
 
@@ -120,22 +114,45 @@ void RobotController::robot_run(void *arg){
             pThis->robot_thread_run = true;
             now = rt_timer_read();
 
-            dxl_pre = rt_timer_read();
-            if (pThis->dataControl->ClientToServerInitParam.module == Module::FAR){
-                pThis->Module_FAR->getGroupSyncReadPresentPosition(present_position);
-//                present_position[0] = pThis->Module_FAR->getPresentPosition(5);
+            switch(pThis->dataControl->opMode){
+            case Status::ServoOn:
+                pThis->robotServo(1);
+                break;
+            case Status::Initialize:
+                break;
+            case Status::Wait :
+                if (pThis->dataControl->module == Module::FAR){
+                    pThis->Module_FAR->getGroupSyncReadPresentPosition(present_position);
+                }
+                else if(pThis->dataControl->module == Module::SEA){
+                    present_position[0] = pThis->Module_SEA->getPresentPosition(1);
+                }
+
+                pThis->robotKinematics();
+                pThis->robotDynamics();
+
+                break;
+            case Status::JointMove:
+                break;
+            case Status::CartesianMove:
+                break;
+            default : break;
             }
-            else if(pThis->dataControl->ClientToServerInitParam.module == Module::SEA){
-                present_position[0] = pThis->Module_SEA->getPresentPosition(1);
-            }
-            dxl_now = rt_timer_read();
 
             rt_printf("Present Position : %d, %d, %d, %d, %d, %d\n",
                       present_position[0], present_position[1], present_position[2], present_position[3], present_position[4], present_position[5]);
-            rt_printf("Comm : Time since last turn: %ld.%06ld ms\n",
-                      static_cast<unsigned long>(dxl_now - dxl_pre) / 1000000,
-                      static_cast<unsigned long>(dxl_now - dxl_pre) % 1000000);
+//            rt_printf("Comm : Time since last turn: %ld.%06ld ms\n",
+//                      static_cast<unsigned long>(now - previous) / 1000000,
+//                      static_cast<unsigned long>(now - previous) % 1000000);
+
+            pThis->dataControl->ServerToClient.data_index = pThis->data_index;
+            memcpy(pThis->dataControl->ServerToClient.presentJoint, present_position, sizeof(int32_t)*6);
+//            if (pThis->dataControl->module == Module::FAR){
+//                pThis->dataControl->ENC2DEG_FAR(present_position, pThis->dataControl->ServerToClient.presentJoint, pThis->dataControl->numJoint);
+//            }
+
             previous = now;
+            pThis->data_index++;
         }
     }
 }
@@ -162,6 +179,7 @@ void RobotController::moduleInitFAR(){
         int init_result = Module_FAR->dxl_init(module_indx);
         if (init_result){
             int32_t pos = Module_FAR->getPresentPosition(module_indx);
+            qDebug() << module_indx << " axis present position : " << pos;
             if (pos != 0)
             {
                 module_indx++;
@@ -173,4 +191,16 @@ void RobotController::moduleInitFAR(){
     }
 //    dxlTimer->start();
     robot_RT();
+}
+
+void RobotController::robotServo(int state){
+
+}
+
+void RobotController::robotKinematics(){
+
+}
+
+void RobotController::robotDynamics(){
+
 }

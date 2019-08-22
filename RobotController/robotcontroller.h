@@ -53,6 +53,12 @@ private:
     void moduleInitFAR();
     bool module_init;
 
+    void robotServo(int state);
+    void robotKinematics();
+    void robotDynamics();
+
+    unsigned char data_index;
+
 public slots:
     void dxlTimeout();
 
